@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import asyncio
+from datetime import datetime
 
 def get_base_dir():
     """获取程序运行时的基础目录。为了稳定性和可见性，统一存放在用户文档目录下"""
@@ -120,7 +121,8 @@ class FetchGameDataThread(QThread):
             try:
                 tool = GameDataTool()
                 accounts = tool.config.get("accounts", [])
-                all_data = []  # 汇总所有账号的游戏数据
+                all_data = []
+                all_raw = []
 
                 if not accounts:
                     self.progress.emit("❌ 错误：未找到已登录账号，请先前往【账号登录】页签。")
@@ -140,15 +142,14 @@ class FetchGameDataThread(QThread):
                         role_name = role.get("roleName", "未知角色")
 
                         try:
-                            # 1. 获取 B-At 令牌
                             b_at = await tool.get_b_at_token(role_id, user_id, token, did)
-
-                            # 2. 获取每日实时数据（包含结晶波片、活跃度等）
                             daily = await tool.get_daily_data(role_id, token, b_at, did)
+
                             daily_details = []
+                            raw_daily = None
                             if isinstance(daily, dict) and daily.get("code") == 200:
+                                raw_daily = daily.get("data", {})
                                 daily_data = daily.get("data", {})
-                                # 按顺序提取关键数据项
                                 for key in ["energyData", "livenessData", "storeEnergyData", "towerData", "weeklyData"]:
                                     detail = daily_data.get(key)
                                     if detail and isinstance(detail, dict):
@@ -157,15 +158,32 @@ class FetchGameDataThread(QThread):
                                             "cur": detail.get("cur", detail.get("value", "?")),
                                             "total": detail.get("total", "?")
                                         })
-                            
+
                             self.progress.emit(f"✅ 成功获取角色: {role_name}")
                             all_data.append({
                                 "phone": phone,
                                 "roleName": role_name,
                                 "details": daily_details
                             })
+                            all_raw.append({
+                                "phone": phone,
+                                "roleName": role_name,
+                                "roleId": role_id,
+                                "userId": user_id,
+                                "fetchTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "rawDailyResponse": raw_daily
+                            })
                         except Exception as e:
                             self.progress.emit(f"⚠️ 角色 [{role_name}] 获取失败: {str(e)}")
+
+                # 保存原始数据到 juese.json 以便比对
+                try:
+                    juese_path = os.path.join(get_base_dir(), "juese.json")
+                    with open(juese_path, "w", encoding="utf-8") as f:
+                        json.dump(all_raw, f, indent=2, ensure_ascii=False)
+                    self.progress.emit(f"📄 原始数据已保存至: {juese_path}")
+                except Exception as e:
+                    self.progress.emit(f"⚠️ 保存 juese.json 失败: {str(e)}")
 
                 return all_data
             except Exception as e:

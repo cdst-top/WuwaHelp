@@ -2,7 +2,9 @@ import asyncio
 import httpx
 import json
 import os
+import time
 import uuid
+from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
 
@@ -36,15 +38,20 @@ class GameDataTool:
                 return {"accounts": []}
 
     def _get_headers(self, token: str, b_at: str = "", did: str = ""):
-        return {
+        headers = {
             "User-Agent": self.user_agent,
             "Source": "android",
             "token": token,
             "B-At": b_at,
-            "Did": did, # 直接使用传入的 did
+            "Did": did,
             "Accept": "application/json, text/plain, */*",
-            "Content-Type": "application/x-www-form-urlencoded"
+            "Content-Type": "application/x-www-form-urlencoded",
+            "pragma": "no-cache",
+            "cache-control": "no-cache",
         }
+        if did:
+            headers["devcode"] = did
+        return headers
 
     async def get_b_at_token(self, role_id: str, user_id: str, token: str, did: str) -> str:
         """获取 B-At 令牌"""
@@ -67,21 +74,20 @@ class GameDataTool:
                 raise Exception(f"获取 B-At 失败: {data.get('msg')}")
 
     async def get_daily_data(self, role_id: str, token: str, b_at: str, did: str):
-        """获取每日体力、活跃度等数据"""
-        # 注意：Java 源码中参数是在 URL 上的，Body 为空
-        url = f"{self.base_url}/gamer/widget/game3/getData"
-        params = {
-            "type": "2",
-            "roleId": role_id,
-            "gameId": self.game_id,
-            "serverId": self.server_id,
-            "sizeType": "1"
-        }
+        """获取每日体力、活跃度等数据 (使用 refresh 端点获取更准确的数据)"""
+        url = f"{self.base_url}/gamer/widget/game3/refresh"
         headers = self._get_headers(token, b_at, did=did)
-        
+        form_data = {
+            "gameId": self.game_id,
+            "roleId": role_id,
+            "serverId": self.server_id,
+            "type": "1",
+            "sizeType": "2",
+            "_t": str(int(time.time() * 1000)),
+        }
+
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # 使用 post 但 body 为空，params 拼接到 URL
-            resp = await client.post(url, headers=headers, params=params)
+            resp = await client.post(url, headers=headers, data=form_data)
             return resp.json()
 
     async def get_base_data(self, role_id: str, token: str, b_at: str, did: str):
@@ -109,6 +115,7 @@ async def main():
     try:
         tool = GameDataTool()
         accounts = tool.config.get("accounts", [])
+        all_raw = []
         
         if not accounts:
             print("配置文件中没有账号信息，请先运行 kuro_login.py 登录。")
@@ -138,6 +145,18 @@ async def main():
                     base_task = tool.get_base_data(role_id, token, b_at, did)
                     
                     daily_resp, base_resp = await asyncio.gather(daily_task, base_task)
+
+                    # 记录原始数据
+                    raw_entry = {
+                        "phone": account.get("mobile", "未知"),
+                        "roleName": role_name,
+                        "roleId": role_id,
+                        "userId": user_id,
+                        "fetchTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "rawDailyResponse": daily_resp.get("data") if daily_resp.get("code") == 200 else None,
+                        "rawBaseResponse": base_resp.get("data") if base_resp.get("code") == 200 else None
+                    }
+                    all_raw.append(raw_entry)
 
                     # 3. 解析并显示每日数据
                     if daily_resp.get("code") == 200:
@@ -191,6 +210,12 @@ async def main():
 
                 except Exception as e:
                     print(f"获取角色 {role_name} 数据时发生错误: {e}")
+
+        # 保存原始数据到 juese.json
+        juese_path = os.path.join(tool.base_dir, "juese.json")
+        with open(juese_path, "w", encoding="utf-8") as f:
+            json.dump(all_raw, f, indent=2, ensure_ascii=False)
+        print(f"\n📄 原始数据已保存至: {juese_path}")
 
     except Exception as e:
         print(f"程序运行发生错误: {e}")

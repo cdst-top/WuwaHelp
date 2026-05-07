@@ -1,0 +1,51 @@
+name: 跨平台打包 (Mac & Windows)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch: # 允许手动点击按钮触发
+
+jobs:
+  build:
+    name: 打包 - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements_build.txt
+
+      - name: 执行打包 (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          pyinstaller --noconfirm --windowed --onefile --name "鸣潮签到助手" --add-data "wuwa_login.py;." --add-data "kuro_signin.py;." --add-data "get_game_data.py;." --collect-all PySide6 main_ui2.py
+
+      - name: 执行打包 (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          pyinstaller --noconfirm --windowed --onefile --name "鸣潮签到助手" --add-data "wuwa_login.py:." --add-data "kuro_signin.py:." --add-data "get_game_data.py:." --collect-all PySide6 main_ui2.py
+
+      - name: 上传制品
+        uses: actions/upload-artifact@v4
+        with:
+          name: 鸣潮签到助手-${{ matrix.os }}
+          path: |
+            dist/*.exe
+            dist/*.app
+            dist/*.zip

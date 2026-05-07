@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QVBoxLayout, QHBoxLayout, QTabWidget,
     QLabel, QPushButton, QTextEdit, QLineEdit,
-    QComboBox, QScrollArea, QGridLayout, QFrame
+    QComboBox, QScrollArea, QGridLayout, QFrame, QLayout, QStyle, QSizePolicy
 )  # 导入 PySide6 核心组件
 import json
 import os
@@ -27,7 +27,7 @@ def get_base_dir():
 from wuwa_login import KuroLogin  # 导入已有的登录逻辑类
 from kuro_signin import KuroSignInTool  # 导入签到逻辑类
 from get_game_data import GameDataTool  # 导入游戏数据获取类
-from PySide6.QtCore import Qt, QThread, Signal, QTimer  # 增加 QTimer 支持
+from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSize, QMargins, QRect, QPoint  # 增加 QTimer 支持
 
 # 增加一个登录线程类，防止 GUI 界面在请求网络时卡死
 class LoginThread(QThread):
@@ -197,6 +197,121 @@ class FetchGameDataThread(QThread):
         result = loop.run_until_complete(do_fetch())
         self.finished.emit(result if result else [])
 
+class FlowLayout(QLayout):
+    def __init__(self, parent=None, margin=0, spacing=-1):
+        super().__init__(parent)
+        self._items = []
+        self._hspacing = spacing
+        self._vspacing = spacing
+        if parent is not None:
+            self.setContentsMargins(QMargins(margin, margin, margin, margin))
+
+    def __del__(self):
+        item = self.takeAt(0)
+        while item:
+            item = self.takeAt(0)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def horizontalSpacing(self):
+        if self._hspacing >= 0:
+            return self._hspacing
+        return self._smartSpacing(QStyle.PixelMetric.PM_LayoutHorizontalSpacing)
+
+    def verticalSpacing(self):
+        if self._vspacing >= 0:
+            return self._vspacing
+        return self._smartSpacing(QStyle.PixelMetric.PM_LayoutVerticalSpacing)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._doLayout(QRect(0, 0, width, 0), True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._doLayout(rect, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+        return size
+
+    def _smartSpacing(self, pm):
+        parent = self.parent()
+        if not parent:
+            return -1
+        if parent.isWidgetType():
+            return parent.style().layoutSpacing(
+                QSizePolicy.ControlType.DefaultType,
+                QSizePolicy.ControlType.DefaultType,
+                Qt.Orientation.Horizontal
+            )
+        return parent.spacing()
+
+    def _doLayout(self, rect, testOnly):
+        left, top, right, bottom = self.getContentsMargins()
+        effective_rect = rect.adjusted(+left, +top, -right, -bottom)
+        x = effective_rect.x()
+        y = effective_rect.y()
+        line_height = 0
+
+        for item in self._items:
+            widget = item.widget()
+            space_x = self.horizontalSpacing()
+            space_y = self.verticalSpacing()
+            if space_x == -1:
+                space_x = widget.style().layoutSpacing(
+                    QSizePolicy.ControlType.DefaultType,
+                    QSizePolicy.ControlType.DefaultType,
+                    Qt.Orientation.Horizontal
+                ) if widget else 0
+            if space_y == -1:
+                space_y = widget.style().layoutSpacing(
+                    QSizePolicy.ControlType.DefaultType,
+                    QSizePolicy.ControlType.DefaultType,
+                    Qt.Orientation.Vertical
+                ) if widget else 0
+
+            next_x = x + item.sizeHint().width() + space_x
+            if next_x - space_x > effective_rect.right() and line_height > 0:
+                x = effective_rect.x()
+                y = y + line_height + space_y
+                next_x = x + item.sizeHint().width() + space_x
+                line_height = 0
+
+            if not testOnly:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+
+            x = next_x
+            line_height = max(line_height, item.sizeHint().height())
+
+        return y + line_height - rect.y() + bottom
+
 class TabbedUI(QMainWindow):
     """
     使用 QTabWidget 实现页签导航的进阶 UI 演示
@@ -363,22 +478,18 @@ class TabbedUI(QMainWindow):
             json.dump(config, f, indent=4, ensure_ascii=False)
 
     def setup_tab2(self):
-        """功能页面2：角色信息 - 9宫格展示"""
+        """功能页面2：角色信息 - 动态流式布局"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
         layout.addWidget(QLabel("<h3>功能模块 2：账号状态概览</h3>"))
 
-        # 滚动区域
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
-        # 内部网格容器
         self.grid_container = QWidget()
-        self.grid_layout = QGridLayout(self.grid_container)
-        self.grid_layout.setSpacing(15)
-        self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.grid_layout = FlowLayout(self.grid_container, margin=0, spacing=15)
         
         scroll.setWidget(self.grid_container)
         layout.addWidget(scroll)
@@ -497,19 +608,16 @@ class TabbedUI(QMainWindow):
         self.btn_refresh_game.setText("🔄 刷新账号状态")
 
         if all_data:
-            # 填充网格布局（3列，即9宫格模式）
-            for i, data in enumerate(all_data):
-                row = i // 3
-                col = i % 3
+            for data in all_data:
                 card = self.create_account_card(data)
-                self.grid_layout.addWidget(card, row, col)
+                self.grid_layout.addWidget(card)
             
             self.statusBar().showMessage(f"刷新成功，共加载 {len(all_data)} 个角色数据", 3000)
         else:
             self.statusBar().showMessage("⚠️ 未获取到任何数据，请确认已登录", 5000)
             no_data = QLabel("暂无数据，请先登录账号并刷新")
             no_data.setStyleSheet("color: #999; margin: 20px;")
-            self.grid_layout.addWidget(no_data, 0, 0)
+            self.grid_layout.addWidget(no_data)
 
     def setup_tab3(self):
         """功能页面3：自动签到"""

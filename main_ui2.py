@@ -150,11 +150,14 @@ class FetchGameDataThread(QThread):
                             if isinstance(daily, dict) and daily.get("code") == 200:
                                 raw_daily = daily.get("data", {})
                                 daily_data = daily.get("data", {})
-                                for key in ["energyData", "livenessData", "storeEnergyData", "towerData", "weeklyData"]:
+                                for key in ["energyData", "livenessData", "storeEnergyData", "towerData", "weeklyData", "weeklyRougeData"]:
                                     detail = daily_data.get(key)
                                     if detail and isinstance(detail, dict):
+                                        item_name = detail.get("name", key)
+                                        if key == "weeklyRougeData":
+                                            item_name = "千道门扉"
                                         daily_details.append({
-                                            "name": detail.get("name", key),
+                                            "name": item_name,
                                             "cur": detail.get("cur", detail.get("value", "?")),
                                             "total": detail.get("total", "?")
                                         })

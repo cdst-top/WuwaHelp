@@ -164,10 +164,13 @@ async def main():
                         print_section("每日实时数据 (原始数据解析)")
                         
                         # 遍历所有 DailyDetail 数据
-                        for key in ["energyData", "livenessData", "storeEnergyData", "towerData", "weeklyData"]:
+                        for key in ["energyData", "livenessData", "storeEnergyData", "towerData", "weeklyData", "weeklyRougeData"]:
                             detail = daily_data.get(key)
                             if detail:
-                                print(f"[{detail.get('name')}]: {detail.get('cur', detail.get('value'))} / {detail.get('total')}")
+                                item_name = detail.get('name')
+                                if key == "weeklyRougeData":
+                                    item_name = "千道门扉"
+                                print(f"[{item_name}]: {detail.get('cur', detail.get('value'))} / {detail.get('total')}")
                         
                         # 特殊处理 battlePassData (列表)
                         bp_list = daily_data.get("battlePassData", [])

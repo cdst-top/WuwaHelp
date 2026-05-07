@@ -2,9 +2,8 @@ name: 跨平台打包 (Mac & Windows)
 
 on:
   push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+    tags:
+      - 'v*' # 当你推送以 v 开头的标签（如 v1.0.0）时触发 Release
   workflow_dispatch: # 允许手动点击按钮触发
 
 jobs:
@@ -34,18 +33,21 @@ jobs:
       - name: 执行打包 (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          pyinstaller --noconfirm --windowed --onefile --name "鸣潮签到助手" --add-data "wuwa_login.py;." --add-data "kuro_signin.py;." --add-data "get_game_data.py;." --collect-all PySide6 main_ui2.py
+          pyinstaller --noconfirm --windowed --onefile --name "鸣潮签到助手_Win" --add-data "wuwa_login.py;." --add-data "kuro_signin.py;." --add-data "get_game_data.py;." --collect-all PySide6 main_ui2.py
 
       - name: 执行打包 (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          pyinstaller --noconfirm --windowed --onefile --name "鸣潮签到助手" --add-data "wuwa_login.py:." --add-data "kuro_signin.py:." --add-data "get_game_data.py:." --collect-all PySide6 main_ui2.py
+          # macOS 下使用 onedir 模式并压缩，解决启动慢和 Release 上传问题
+          pyinstaller --noconfirm --windowed --onedir --name "鸣潮签到助手_Mac" --add-data "wuwa_login.py:." --add-data "kuro_signin.py:." --add-data "get_game_data.py:." --collect-all PySide6 main_ui2.py
+          cd dist && zip -r ../鸣潮签到助手_Mac.zip "鸣潮签到助手_Mac.app"
 
-      - name: 上传制品
-        uses: actions/upload-artifact@v4
+      - name: 上传 Release 附件
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: 鸣潮签到助手-${{ matrix.os }}
-          path: |
+          files: |
             dist/*.exe
-            dist/*.app
-            dist/*.zip
+            鸣潮签到助手_Mac.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
